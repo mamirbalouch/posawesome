@@ -1850,6 +1850,7 @@ export default {
 				this.first_search.startsWith(this.pos_profile.posa_scale_barcode_start);
 			this.search = search;
 
+
 			const qty = parseFloat(this.get_item_qty(this.first_search));
 			const new_item = { ...this.displayedItems[0] };
 			new_item.qty = flt(qty);
@@ -1866,7 +1867,27 @@ export default {
 					}
 				});
 			}
-			if (!match && new_item.barcode === search) {
+			
+            // Fallbacks for scale barcode matching
+            if (!match && isScaleBarcode) {
+                const prefix_len2 = this.pos_profile.posa_scale_barcode_start?.length || 0;
+                const item_code_len2 = this.first_search.length - prefix_len2 - 6;
+                const bareItemCode = this.first_search.substr(prefix_len2, item_code_len2);
+
+                if (Array.isArray(new_item.item_barcode)) {
+                    new_item.item_barcode.forEach((element) => {
+                        if (!match && bareItemCode === element.barcode) {
+                            new_item.uom = element.posa_uom;
+                            match = true;
+                        }
+                    });
+                }
+
+                if (!match && (new_item.item_code === bareItemCode || new_item.name === bareItemCode)) {
+                    match = true;
+                }
+            }
+if (!match && new_item.barcode === search) {
 				match = true;
 			}
 			if (!match && Array.isArray(new_item.barcodes)) {
@@ -3105,6 +3126,16 @@ export default {
 			// First try to find exact match by processed code using the pre-built index
 			const barcodeIndex = this.ensureBarcodeIndex();
 			let foundItem = this.lookupItemByBarcode(searchCode);
+            // Fallback: if code not found and this is a scale barcode, try bare item code too
+            if (!foundItem && isScaleBarcode) {
+                const prefix_len2 = this.pos_profile.posa_scale_barcode_start?.length || 0;
+                const item_code_len2 = scannedCode.length - prefix_len2 - 6;
+                if (item_code_len2 > 0) {
+                    const bareItemCode = scannedCode.substr(prefix_len2, item_code_len2);
+                    foundItem = this.lookupItemByBarcode(bareItemCode) || foundItem;
+                }
+            }
+
 
 			if (!foundItem && barcodeIndex.size === 0) {
 				// Index not populated yet, build it and fall back to a direct scan once
