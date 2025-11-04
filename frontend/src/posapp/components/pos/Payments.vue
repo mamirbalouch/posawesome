@@ -1099,7 +1099,7 @@ export default {
 					this.flt(this.loyalty_amount) / this.customer_info.conversion_factor;
 			}
 		},
-		// Watch redeemed_customer_credit to validate
+		// Watch redeemed_customer_credit to validate and update payment
 		redeemed_customer_credit(newVal) {
 			if (newVal > this.available_customer_credit) {
 				this.redeemed_customer_credit = this.available_customer_credit;
@@ -1107,6 +1107,19 @@ export default {
 					title: `You can redeem customer credit up to ${this.available_customer_credit}`,
 					color: "error",
 				});
+				return;
+			}
+
+			if (!this.invoice_doc) {
+				return;
+			}
+
+			const total = this.invoice_doc.rounded_total || this.invoice_doc.grand_total;
+			const remaining = total - newVal;
+
+			const default_payment = this.invoice_doc.payments.find((p) => p.default === 1);
+			if (default_payment) {
+				default_payment.amount = remaining > 0 ? remaining : 0;
 			}
 		},
 		// Recalculate total redeemed credit whenever credit entries change

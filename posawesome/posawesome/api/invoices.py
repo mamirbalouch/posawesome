@@ -24,8 +24,14 @@ from frappe.utils import (
 )
 from frappe.utils.background_jobs import enqueue
 
-from posawesome.posawesome.api.payments import redeeming_customer_credit
-from posawesome.posawesome.api.utilities import ensure_child_doctype, set_batch_nos_for_bundels
+from posawesome.posawesome.api.payments import (
+    redeeming_customer_credit,
+)  # Updated import
+from posawesome.posawesome.api.utilities import (
+    ensure_child_doctype,
+    set_batch_nos_for_bundels,
+)  # Updated imports
+
 from .items import get_stock_availability
 
 
@@ -504,94 +510,34 @@ def submit_invoice(invoice, data):
 
     invoice_doc.remarks = "\n".join(items)
 
-    # creating advance payment
-    if data.get("credit_change"):
-        cash_mode_of_payment = None
-        for payment in invoice_doc.payments:
-            if payment.get("type") == "Cash" and payment.get("mode_of_payment"):
-                cash_mode_of_payment = payment.get("mode_of_payment")
-                break
-
-        if not cash_mode_of_payment and pos_profile:
-            cash_mode_of_payment = (
-                frappe.db.get_value("POS Profile", pos_profile, "posa_cash_mode_of_payment")
-                or "Cash"
-            )
-
-        posting_date = invoice_doc.get("posting_date") or nowdate()
-        reference_no = invoice_doc.get("posa_pos_opening_shift")
-
-        cash_account_name = (
-            cash_account.get("account") if isinstance(cash_account, (dict, frappe._dict)) else cash_account
+    # creating advance payment for credit change
+    if data.get("credit_change") and flt(data.get("credit_change")) > 0:
+        pe = frappe.new_doc("Payment Entry")
+        pe.payment_type = "Pay"
+        pe.party_type = "Customer"
+        pe.party = invoice_doc.customer
+        pe.company = invoice_doc.company
+        pe.posting_date = nowdate()
+        pe.mode_of_payment = frappe.db.get_value(
+            "POS Profile", invoice_doc.pos_profile, "posa_cash_mode_of_payment"
         )
-        if not cash_account_name:
-            frappe.throw(_("Unable to determine cash account for change payment entry."))
-
-        party_account = invoice_doc.get("debit_to")
-        if not party_account and invoice_doc.get("customer"):
-            party_account = get_party_account("Customer", invoice_doc.get("customer"), invoice_doc.get("company"))
-        if not party_account:
-            frappe.throw(_("Unable to determine customer receivable account for change payment entry."))
-
-        advance_payment_entry = frappe.new_doc("Payment Entry")
-        advance_payment_entry.payment_type = "Pay"
-        advance_payment_entry.mode_of_payment = cash_mode_of_payment or "Cash"
-        advance_payment_entry.party_type = "Customer"
-        advance_payment_entry.party = invoice_doc.get("customer")
-        advance_payment_entry.company = invoice_doc.get("company")
-        advance_payment_entry.posting_date = posting_date
-        advance_payment_entry.paid_from = cash_account_name
-        advance_payment_entry.paid_to = party_account
-        amount = flt(invoice_doc.get("credit_change"))
-        advance_payment_entry.paid_amount = amount
-        advance_payment_entry.received_amount = amount
-        advance_payment_entry.difference_amount = 0
-        advance_payment_entry.reference_no = reference_no
-        advance_payment_entry.reference_date = posting_date
-
-        advance_payment_entry.setup_party_account_field()
-        advance_payment_entry.set_missing_values()
-        advance_payment_entry.set_amounts()
-        advance_payment_entry.paid_amount = amount
-        advance_payment_entry.received_amount = amount
-
-        if reference_no:
-            advance_payment_entry.reference_no = reference_no
-            advance_payment_entry.reference_date = posting_date
-
-        advance_payment_entry.flags.ignore_permissions = True
-        frappe.flags.ignore_account_permission = True
-        advance_payment_entry.save()
-        advance_payment_entry.submit()
+        pe.paid_from = cash_account.get("account")
+        pe.paid_to = get_party_account("Customer", invoice_doc.customer, invoice_doc.company)
+        pe.paid_amount = flt(data.get("credit_change"))
+        pe.received_amount = flt(data.get("credit_change"))
+        pe.reference_no = invoice_doc.posa_pos_opening_shift
+        pe.reference_date = nowdate()
+        pe.remark = _("Credit change for invoice {0}").format(invoice_doc.name)
+        pe.flags.ignore_permissions = True
+        pe.save()
+        pe.submit()
 
     # calculating cash
     total_cash = 0
     if data.get("redeemed_customer_credit"):
         total_cash = invoice_doc.total - float(data.get("redeemed_customer_credit"))
 
-    is_payment_entry = 0
-    if data.get("redeemed_customer_credit"):
-        for row in data.get("customer_credit_dict"):
-            if row["type"] == "Advance" and row["credit_to_redeem"]:
-                advance = frappe.get_doc("Payment Entry", row["credit_origin"])
-
-                advance_payment = {
-                    "reference_type": "Payment Entry",
-                    "reference_name": advance.name,
-                    "remarks": advance.remarks,
-                    "advance_amount": advance.unallocated_amount,
-                    "allocated_amount": row["credit_to_redeem"],
-                }
-
-                advance_row = invoice_doc.append("advances", {})
-                advance_row.update(advance_payment)
-                child_dt = (
-                    "POS Invoice Advance" if invoice_doc.doctype == "POS Invoice" else "Sales Invoice Advance"
-                )
-                ensure_child_doctype(invoice_doc, "advances", child_dt)
-                invoice_doc.is_pos = 0
-                is_payment_entry = 1
-
+    is_payment_entry = 1
     payments = invoice_doc.payments
 
     _auto_set_return_batches(invoice_doc)

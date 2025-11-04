@@ -8,6 +8,10 @@ import frappe
 from frappe.utils import nowdate, flt
 from frappe import _
 from erpnext.accounts.party import get_party_bank_account
+from erpnext.accounts.doctype.payment_entry.payment_entry import (
+    reconcile_against_document,
+    reconcile_dr_cr_note,
+)
 from erpnext.accounts.doctype.payment_request.payment_request import (
     get_dummy_message,
     get_existing_payment_request_amount,
@@ -212,94 +216,45 @@ def get_amount(ref_doc, payment_account=None):
         frappe.throw(_("Payment Entry is already created or payment account is not matched"))
 
 
-from erpnext.accounts.utils import reconcile_against_document
-from erpnext.accounts.doctype.payment_reconciliation.payment_reconciliation import (
-	reconcile_dr_cr_note,
-)
-
-
 def redeeming_customer_credit(invoice_doc, data, is_payment_entry, total_cash, cash_account, payments):
-	today = nowdate()
-	if data.get("redeemed_customer_credit"):
-		for row in data.get("customer_credit_dict"):
-			credit_to_redeem = flt(row.get("credit_to_redeem"))
-			if not credit_to_redeem > 0:
-				continue
+    if not flt(data.get("redeemed_customer_credit")):
+        return
 
-			if row["type"] == "Invoice":
-				credit_note = frappe.get_doc("Sales Invoice", row["credit_origin"])
-				reconciliation_entries = [
-					frappe._dict(
-						{
-							"voucher_type": "Sales Invoice",
-							"voucher_no": credit_note.name,
-							"against_voucher_type": "Sales Invoice",
-							"against_voucher": invoice_doc.name,
-							"account": credit_note.debit_to,
-							"party_type": "Customer",
-							"party": invoice_doc.customer,
-							"dr_or_cr": "credit_in_account_currency",
-							"allocated_amount": credit_to_redeem,
-						}
-					)
-				]
-				reconcile_dr_cr_note(reconciliation_entries, invoice_doc.company)
+    frappe.flags.ignore_account_permission = True
 
-			elif row["type"] == "Advance":
-				payment_entry = frappe.get_doc("Payment Entry", row["credit_origin"])
-				reconciliation_entries = [
-					frappe._dict(
-						{
-							"voucher_type": "Payment Entry",
-							"voucher_no": payment_entry.name,
-							"against_voucher_type": "Sales Invoice",
-							"against_voucher": invoice_doc.name,
-							"account": payment_entry.paid_from,
-							"party_type": "Customer",
-							"party": invoice_doc.customer,
-							"dr_or_cr": "credit_in_account_currency",
-							"allocated_amount": credit_to_redeem,
-						}
-					)
-				]
-				reconcile_against_document(reconciliation_entries)
+    for row in data.get("customer_credit_dict"):
+        credit_to_redeem = flt(row.get("credit_to_redeem"))
+        if not credit_to_redeem:
+            continue
 
-	if is_payment_entry and total_cash > 0:
-		for payment in payments:
-			if not payment.amount:
-				continue
-			payment_entry_doc = frappe.get_doc(
-				{
-					"doctype": "Payment Entry",
-					"posting_date": today,
-					"payment_type": "Receive",
-					"party_type": "Customer",
-					"party": invoice_doc.customer,
-					"paid_amount": payment.amount,
-					"received_amount": payment.amount,
-					"paid_from": invoice_doc.debit_to,
-					"paid_to": payment.account,
-					"company": invoice_doc.company,
-					"mode_of_payment": payment.mode_of_payment,
-					"reference_no": invoice_doc.posa_pos_opening_shift,
-					"reference_date": today,
-				}
-			)
-
-			payment_reference = {
-				"allocated_amount": payment.amount,
-				"due_date": data.get("due_date"),
-				"reference_doctype": "Sales Invoice",
-				"reference_name": invoice_doc.name,
-			}
-
-			ref_row = payment_entry_doc.append("references", {})
-			ref_row.update(payment_reference)
-			ensure_child_doctype(payment_entry_doc, "references", "Payment Entry Reference")
-			payment_entry_doc.flags.ignore_permissions = True
-			frappe.flags.ignore_account_permission = True
-			payment_entry_doc.save()
-			payment_entry_doc.submit()
+        if row.get("type") == "Advance":
+            frappe.call(
+                "erpnext.accounts.doctype.payment_entry.payment_entry.reconcile_against_document",
+                {
+                    "dt": "Payment Entry",
+                    "dn": row.get("credit_origin"),
+                    "against_vouchers": [
+                        {
+                            "voucher_type": invoice_doc.doctype,
+                            "voucher_no": invoice_doc.name,
+                            "due_date": invoice_doc.due_date,
+                            "invoice_amount": invoice_doc.grand_total,
+                            "outstanding_amount": invoice_doc.outstanding_amount,
+                            "allocated_amount": credit_to_redeem,
+                        }
+                    ],
+                },
+            )
+        elif row.get("type") == "Invoice":
+            frappe.call(
+                "erpnext.accounts.doctype.payment_entry.payment_entry.reconcile_dr_cr_note",
+                {
+                    "dr_note": row.get("credit_origin"),
+                    "cr_note": invoice_doc.name,
+                    "amount": credit_to_redeem,
+                    "type": "Sales Invoice",
+                },
+            )
 
 
 @frappe.whitelist()
