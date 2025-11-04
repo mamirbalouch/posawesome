@@ -277,23 +277,34 @@ def redeeming_customer_credit(invoice_doc, data, is_payment_entry, total_cash, c
         for payment in payments:
             if not payment.amount:
                 continue
-            payment_entry_doc = frappe.get_doc(
-                {
-                    "doctype": "Payment Entry",
-                    "posting_date": today,
-                    "payment_type": "Receive",
-                    "party_type": "Customer",
-                    "party": invoice_doc.customer,
-                    "paid_amount": payment.amount,
-                    "received_amount": payment.amount,
-                    "paid_from": invoice_doc.debit_to,
-                    "paid_to": payment.account,
-                    "company": invoice_doc.company,
-                    "mode_of_payment": payment.mode_of_payment,
-                    "reference_no": invoice_doc.posa_pos_opening_shift,
-                    "reference_date": today,
-                }
-            )
+            payment_entry_doc_dict = {
+                "doctype": "Payment Entry",
+                "posting_date": today,
+                "payment_type": "Receive",
+                "party_type": "Customer",
+                "party": invoice_doc.customer,
+                "paid_from": invoice_doc.debit_to,
+                "paid_to": payment.account,
+                "company": invoice_doc.company,
+                "mode_of_payment": payment.mode_of_payment,
+                "reference_no": invoice_doc.posa_pos_opening_shift,
+                "reference_date": today,
+            }
+
+            company_currency = frappe.get_cached_value("Company", invoice_doc.company, "default_currency")
+            if invoice_doc.currency != company_currency:
+                # `paid_amount` is in currency of `paid_from` (company currency)
+                # `received_amount` is in currency of `paid_to` (transaction currency)
+                payment_entry_doc_dict["paid_amount"] = payment.base_amount
+                payment_entry_doc_dict["received_amount"] = payment.amount
+                payment_entry_doc_dict["paid_from_account_currency"] = company_currency
+                payment_entry_doc_dict["paid_to_account_currency"] = invoice_doc.currency
+                payment_entry_doc_dict["target_exchange_rate"] = invoice_doc.conversion_rate
+            else:
+                payment_entry_doc_dict["paid_amount"] = payment.amount
+                payment_entry_doc_dict["received_amount"] = payment.amount
+
+            payment_entry_doc = frappe.get_doc(payment_entry_doc_dict)
 
             payment_reference = {
                 "allocated_amount": payment.amount,
