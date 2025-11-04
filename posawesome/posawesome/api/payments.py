@@ -273,6 +273,8 @@ def redeeming_customer_credit(invoice_doc, data, is_payment_entry, total_cash, c
                     frappe.log_error(frappe.get_traceback(), "POSAwesome JV Error")
                     frappe.throw(_("Unable to create Journal Entry for customer credit."))
 
+
+
     if is_payment_entry and total_cash > 0:
         for payment in payments:
             if not payment.amount:
