@@ -213,102 +213,116 @@ def get_amount(ref_doc, payment_account=None):
 
 
 def redeeming_customer_credit(invoice_doc, data, is_payment_entry, total_cash, cash_account, payments):
-    # redeeming customer credit with journal voucher
     today = nowdate()
     if data.get("redeemed_customer_credit"):
         cost_center = frappe.get_value("POS Profile", invoice_doc.pos_profile, "cost_center")
         if not cost_center:
             cost_center = frappe.get_value("Company", invoice_doc.company, "cost_center")
         if not cost_center:
-            frappe.throw(_("Cost Center is not set in pos profile {}").format(invoice_doc.pos_profile))
+            frappe.throw(_("Please set a default Cost Center for Company {}").format(invoice_doc.company))
+
         for row in data.get("customer_credit_dict"):
-            if row["type"] == "Invoice" and row["credit_to_redeem"]:
-                outstanding_invoice = frappe.get_doc("Sales Invoice", row["credit_origin"])
+            credit_to_redeem = flt(row.get("credit_to_redeem"))
+            if not credit_to_redeem > 0:
+                continue
 
-                jv_doc = frappe.get_doc(
-                    {
-                        "doctype": "Journal Entry",
-                        "voucher_type": "Journal Entry",
-                        "posting_date": today,
-                        "company": invoice_doc.company,
-                    }
+            source_account = None
+            source_ref_type = None
+            source_ref_name = None
+
+            if row["type"] == "Invoice":
+                source_doc = frappe.get_doc("Sales Invoice", row["credit_origin"])
+                source_account = source_doc.debit_to
+                source_ref_type = "Sales Invoice"
+                source_ref_name = source_doc.name
+            elif row["type"] == "Advance":
+                source_doc = frappe.get_doc("Payment Entry", row["credit_origin"])
+                source_account = source_doc.paid_from
+                source_ref_type = "Payment Entry"
+                source_ref_name = source_doc.name
+
+            if not source_account:
+                frappe.log_error(
+                    "POSAwesome: Could not determine source account for credit redemption.",
+                    "Credit Redemption Error",
                 )
+                continue
 
-                debit_row = jv_doc.append("accounts", {})
-                debit_row.update(
-                    {
-                        "account": outstanding_invoice.debit_to,
-                        "party_type": "Customer",
-                        "party": invoice_doc.customer,
-                        "reference_type": "Sales Invoice",
-                        "reference_name": outstanding_invoice.name,
-                        "debit_in_account_currency": row["credit_to_redeem"],
-                        "cost_center": cost_center,
-                    }
-                )
+            jv_doc = frappe.new_doc("Journal Entry")
+            jv_doc.posting_date = today
+            jv_doc.voucher_type = "Journal Entry"
+            jv_doc.company = invoice_doc.company
+            jv_doc.user_remark = get_posawesome_credit_redeem_remark(invoice_doc.name)
 
-                credit_row = jv_doc.append("accounts", {})
-                credit_row.update(
-                    {
-                        "account": invoice_doc.debit_to,
-                        "party_type": "Customer",
-                        "party": invoice_doc.customer,
-                        "reference_type": "Sales Invoice",
-                        "reference_name": invoice_doc.name,
-                        "credit_in_account_currency": row["credit_to_redeem"],
-                        "cost_center": cost_center,
-                    }
-                )
+            # Debit entry to consume the credit from the source document (return invoice or advance)
+            jv_doc.append(
+                "accounts",
+                {
+                    "account": source_account,
+                    "party_type": "Customer",
+                    "party": invoice_doc.customer,
+                    "reference_type": source_ref_type,
+                    "reference_name": source_ref_name,
+                    "debit_in_account_currency": credit_to_redeem,
+                    "cost_center": cost_center,
+                },
+            )
 
-                ensure_child_doctype(jv_doc, "accounts", "Journal Entry Account")
+            # Credit entry to apply payment to the new sales invoice
+            jv_doc.append(
+                "accounts",
+                {
+                    "account": invoice_doc.debit_to,
+                    "party_type": "Customer",
+                    "party": invoice_doc.customer,
+                    "reference_type": "Sales Invoice",
+                    "reference_name": invoice_doc.name,
+                    "credit_in_account_currency": credit_to_redeem,
+                    "cost_center": cost_center,
+                },
+            )
 
-                jv_doc.flags.ignore_permissions = True
-                frappe.flags.ignore_account_permission = True
-                jv_doc.user_remark = get_posawesome_credit_redeem_remark(invoice_doc.name)
-                jv_doc.set_missing_values()
-                try:
-                    jv_doc.save()
-                    jv_doc.submit()
-                except Exception as e:
-                    frappe.log_error(frappe.get_traceback(), "POSAwesome JV Error")
-                    frappe.throw(_("Unable to create Journal Entry for customer credit."))
+            jv_doc.flags.ignore_permissions = True
+            try:
+                jv_doc.submit()
+            except Exception:
+                frappe.log_error(frappe.get_traceback(), "POSAwesome JV Error")
+                frappe.throw(_("Unable to create Journal Entry for customer credit redemption."))
 
     if is_payment_entry and total_cash > 0:
         for payment in payments:
-            if not payment.amount:
+            if not flt(payment.amount) > 0:
                 continue
-            payment_entry_doc = frappe.get_doc(
+
+            pe = frappe.new_doc("Payment Entry")
+            pe.posting_date = today
+            pe.payment_type = "Receive"
+            pe.party_type = "Customer"
+            pe.party = invoice_doc.customer
+            pe.paid_amount = payment.amount
+            pe.received_amount = payment.amount
+            pe.paid_from = invoice_doc.debit_to
+            pe.paid_to = payment.account
+            pe.company = invoice_doc.company
+            pe.mode_of_payment = payment.mode_of_payment
+            pe.reference_no = invoice_doc.posa_pos_opening_shift
+            pe.reference_date = today
+
+            # Handle multi-currency
+            if invoice_doc.currency != pe.company_currency:
+                pe.source_exchange_rate = invoice_doc.conversion_rate
+                pe.target_exchange_rate = invoice_doc.conversion_rate
+
+            pe.append(
+                "references",
                 {
-                    "doctype": "Payment Entry",
-                    "posting_date": today,
-                    "payment_type": "Receive",
-                    "party_type": "Customer",
-                    "party": invoice_doc.customer,
-                    "paid_amount": payment.amount,
-                    "received_amount": payment.amount,
-                    "paid_from": invoice_doc.debit_to,
-                    "paid_to": payment.account,
-                    "company": invoice_doc.company,
-                    "mode_of_payment": payment.mode_of_payment,
-                    "reference_no": invoice_doc.posa_pos_opening_shift,
-                    "reference_date": today,
-                }
+                    "reference_doctype": "Sales Invoice",
+                    "reference_name": invoice_doc.name,
+                    "allocated_amount": payment.amount,
+                },
             )
-
-            payment_reference = {
-                "allocated_amount": payment.amount,
-                "due_date": data.get("due_date"),
-                "reference_doctype": "Sales Invoice",
-                "reference_name": invoice_doc.name,
-            }
-
-            ref_row = payment_entry_doc.append("references", {})
-            ref_row.update(payment_reference)
-            ensure_child_doctype(payment_entry_doc, "references", "Payment Entry Reference")
-            payment_entry_doc.flags.ignore_permissions = True
-            frappe.flags.ignore_account_permission = True
-            payment_entry_doc.save()
-            payment_entry_doc.submit()
+            pe.flags.ignore_permissions = True
+            pe.submit()
 
 
 @frappe.whitelist()

@@ -1763,12 +1763,22 @@ export default {
 								}
 							});
 							this.customer_credit_dict = data;
+							const default_payment = this.invoice_doc.payments.find(
+								(payment) => payment.default === 1,
+							);
+							if (default_payment) {
+								default_payment.amount = remainAmount;
+							}
 						} else {
 							this.customer_credit_dict = [];
 						}
 					});
 			} else {
 				this.customer_credit_dict = [];
+				const default_payment = this.invoice_doc.payments.find((payment) => payment.default === 1);
+				if (default_payment) {
+					default_payment.amount = this.invoice_doc.rounded_total || this.invoice_doc.grand_total;
+				}
 			}
 		},
 		// Get customer addresses for shipping
