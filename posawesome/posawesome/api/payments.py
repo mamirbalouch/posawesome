@@ -212,6 +212,12 @@ def get_amount(ref_doc, payment_account=None):
         frappe.throw(_("Payment Entry is already created or payment account is not matched"))
 
 
+from erpnext.accounts.utils import reconcile_against_document
+from erpnext.accounts.doctype.payment_reconciliation.payment_reconciliation import (
+	reconcile_dr_cr_note,
+)
+
+
 def redeeming_customer_credit(invoice_doc, data, is_payment_entry, total_cash, cash_account, payments):
 	today = nowdate()
 	if data.get("redeemed_customer_credit"):

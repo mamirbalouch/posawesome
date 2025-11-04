@@ -24,14 +24,8 @@ from frappe.utils import (
 )
 from frappe.utils.background_jobs import enqueue
 
-from posawesome.posawesome.api.payments import (
-    redeeming_customer_credit,
-)  # Updated import
-from posawesome.posawesome.api.utilities import (
-    ensure_child_doctype,
-    set_batch_nos_for_bundels,
-)  # Updated imports
-
+from posawesome.posawesome.api.payments import redeeming_customer_credit
+from posawesome.posawesome.api.utilities import ensure_child_doctype, set_batch_nos_for_bundels
 from .items import get_stock_availability
 
 
