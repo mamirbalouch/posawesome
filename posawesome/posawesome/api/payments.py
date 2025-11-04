@@ -295,6 +295,7 @@ def redeeming_customer_credit(invoice_doc, data, is_payment_entry, total_cash, c
                 payment_entry_doc.received_amount = payment.amount
                 payment_entry_doc.paid_from_account_currency = company_currency
                 payment_entry_doc.paid_to_account_currency = invoice_doc.currency
+                payment_entry_doc.source_exchange_rate = invoice_doc.conversion_rate
                 payment_entry_doc.target_exchange_rate = invoice_doc.conversion_rate
             else:
                 payment_entry_doc.paid_amount = payment.amount
