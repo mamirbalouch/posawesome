@@ -97,6 +97,41 @@ def get_applicable_delivery_charges(company, pos_profile, customer, shipping_add
     return _get_applicable_delivery_charges(company, pos_profile, customer, shipping_address_name)
 
 
+def get_promotional_scheme_for_party(party, party_type, company, date):
+    """Get promotional scheme for a party."""
+    if not frappe.db.table_exists("Promotional Scheme"):
+        return []
+
+    promotional_scheme_doctype = "Promotional Scheme"
+    applicable_for_detail_doctype = "Promotional Scheme Applicable For"
+
+    schemes = frappe.db.sql(
+        """
+        SELECT
+            ps.name
+        FROM
+            `tab{promotional_scheme_doctype}` ps
+        JOIN
+            `tab{applicable_for_detail_doctype}` afd
+        ON
+            ps.name = afd.parent
+        WHERE
+            ps.applicable_for = %(party_type)s
+            AND ps.disable = 0
+            AND ps.selling = 1
+            AND ps.company = %(company)s
+            AND afd.name = %(party)s
+    """.format(
+            promotional_scheme_doctype=promotional_scheme_doctype,
+            applicable_for_detail_doctype=applicable_for_detail_doctype,
+        ),
+        values={"party_type": party_type, "company": company, "party": party},
+        pluck="name",
+    )
+
+    return schemes
+
+
 def _get_promotional_scheme_offers(pos_profile):
     if not frappe.db.table_exists("Promotional Scheme"):
         return []
@@ -112,6 +147,7 @@ def _get_promotional_scheme_offers(pos_profile):
             WHERE
                 disable = 0
                 AND selling = 1
+                AND applicable_for IS NULL OR applicable_for = ''
                 AND company = %(company)s
                 AND (valid_from IS NULL OR valid_from = '' OR valid_from <= %(date)s)
                 AND (valid_upto IS NULL OR valid_upto = '' OR valid_upto >= %(date)s)
@@ -119,6 +155,13 @@ def _get_promotional_scheme_offers(pos_profile):
             values=values,
             as_dict=True,
         )
+
+        if pos_profile.customer:
+            customer_schemes = get_promotional_scheme_for_party(
+                pos_profile.customer, "Customer", pos_profile.company, date
+            )
+            promotional_schemes.extend({"name": scheme} for scheme in customer_schemes)
+
     except Exception:
         frappe.log_error(frappe.get_traceback(), "POS Awesome - Failed to fetch Promotional Schemes")
         return []
@@ -141,7 +184,7 @@ def _get_promotional_scheme_offers(pos_profile):
 
 def _prepare_promotional_scheme_offers(scheme, pos_profile):
     # Skip schemes with party specific or unsupported configurations for POS logic
-    if scheme.applicable_for or scheme.apply_rule_on_other:
+    if scheme.apply_rule_on_other:
         return []
 
     if scheme.mixed_conditions or scheme.is_cumulative:

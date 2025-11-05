@@ -2981,6 +2981,7 @@ export default {
 			this.remove_item(item);
 			this.$forceUpdate();
 		}
+		this.scheduleOfferRefresh([item.posa_row_id]);
 	},
 
 	// Update quantity limits based on available stock (simplified - validation handled centrally)
