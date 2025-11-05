@@ -621,8 +621,8 @@ export default {
 		return offer;
 	},
 
-	updatePosOffers(offers) {
-		this.eventBus.emit("update_pos_offers", offers);
+	updatePosOffers(offers, run_immediately) {
+		this.eventBus.emit("update_pos_offers", { offers, run_immediately });
 	},
 
 	async updateInvoiceOffers(offers) {
@@ -1129,7 +1129,8 @@ export default {
 		// Handle free items
 		const is_free =
 			(offer.discount_type === "Rate" && !offer.rate) ||
-			(offer.discount_type === "Discount Percentage" && offer.discount_percentage == 100);
+			(offer.discount_type === "Discount Percentage" && offer.discount_percentage == 100) ||
+			(offer.offer === "Give Product" && offer.free_qty > 0);
 
 		new_item.is_free_item = is_free ? 1 : 0;
 
