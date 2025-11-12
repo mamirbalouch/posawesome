@@ -1440,17 +1440,17 @@ export default {
 	padding: 0 !important;
 	width: 100% !important;
 	max-width: 100% !important;
-	overflow: hidden;
+	height: auto !important;
 	box-sizing: border-box;
-	/* Ensure it spans the full table width including expand column */
 	position: relative;
+	overflow: hidden;
 }
 
 /* Main expanded content container */
 .expanded-content {
-	padding: 24px;
-	width: 100% !important;
-	max-width: 100% !important;
+	padding: 16px;
+	width: 100%;
+	max-width: 100%;
 	box-sizing: border-box;
 	background: var(--pos-card-bg);
 	border-radius: 0 0 8px 8px;
@@ -1458,14 +1458,16 @@ export default {
 	border-top: none;
 	animation: expandIn 0.3s ease forwards;
 
-	/* Enable container queries */
-	container-type: inline-size;
-	container-name: expanded-content;
+	/* Control height & scrolling */
+	max-height: 220px; 
+	overflow-y: auto; 
+	overflow-x: hidden; 
+	scrollbar-width: thin; 
+	scrollbar-color: var(--pos-border) transparent;
 
-	/* Ensure full width utilization */
+	/* Layout consistency */
 	margin: 0;
 	position: relative;
-	overflow: visible;
 }
 
 @keyframes expandIn {
