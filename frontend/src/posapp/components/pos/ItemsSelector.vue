@@ -1923,7 +1923,25 @@ export default {
 					}, 300);
 				}
 			}
+			if (
+				vm.pos_profile?.auto_add_item_to_cart &&
+				vm.displayedItems &&
+				vm.displayedItems.length === 1
+			) {
+				const onlyItem = vm.displayedItems[0];
 
+				// Trigger the same logic used when pressing Enter
+				await vm.add_item(
+					{ ...onlyItem, qty: 1 },
+					{ suppressNegativeWarning: true }
+				);
+
+				// Clear search after auto add
+				vm.clearSearch();
+				vm.focusItemSearch();
+				vm.search_from_scanner = false;
+			}
+			
 			// Clear the input only when triggered via scanner
 			if (fromScanner) {
 				vm.clearSearch();
